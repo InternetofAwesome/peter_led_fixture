@@ -52,7 +52,7 @@ int sensorValue = 0;  // variable to store the value coming from the sensor
 //LED control pins
 uint8_t spins[] = {4, 5, 6, 7, 8};
 //leds per each strand
-uint8_t snum[] = {1, 1, 1, 1, 1};
+uint8_t snum[] = {88, 121, 119, 116, 71};
 
 Adafruit_NeoPixel strand[] = {
   Adafruit_NeoPixel(snum[0], spins[0], NEO_GRB + NEO_KHZ800),
@@ -89,6 +89,7 @@ pot_state_e pot_state = NORMAL;
 
 uint8_t value = 128;
 uint16_t hue[] = {0, 0, 0, 0, 0};
+uint8_t sat[] = {0, 0, 0, 0, 0};
 
 uint32_t value_sum; //used for running average of value
 
@@ -98,6 +99,10 @@ void load_eeprom()
   {
     ((uint8_t*)hue)[i] = EEPROM.read(i);
   }
+  for(int i = 0; i<sizeof(sat); i++)
+  {
+     sat[i] = EEPROM.read(i + sizeof(hue));
+  }
 }
 
 void save_eeprom()
@@ -106,11 +111,15 @@ void save_eeprom()
   {
     EEPROM.write(i, ((uint8_t*)hue)[i]);
   }
+  for(int i = 0; i<sizeof(sat); i++)
+  {
+     EEPROM.write(i + sizeof(hue), sat[i]);
+  }
 }
 
-uint32_t get_color(uint16_t h, uint8_t v)
+uint32_t get_color(uint16_t h, uint8_t s, uint8_t v)
 {
-  return strand[0].gamma32(strand[0].ColorHSV(h, 255, v));
+  return strand[0].gamma32(strand[0].ColorHSV(h, s, v));
 }
 
 void set_value(uint8_t val)
@@ -120,7 +129,7 @@ void set_value(uint8_t val)
   {
     for(int i=0; i<NUM_STRANDS; i++)
     { 
-      strand[i].fill(get_color(hue[i], value),  0, snum[i]); 
+      strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
     }
     return;
   }
@@ -128,16 +137,18 @@ void set_value(uint8_t val)
     inc = -1;
   else
     inc = 1;
+    
+  inc *= 4;
   
-  while(value != val)
+  while(abs(value - val) > 4)
   {
     value += inc;
     for(int i=0; i<NUM_STRANDS; i++)
     {
-      strand[i].fill(get_color(hue[i], value),  0, snum[i]); 
+      strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
       strand[i].show();
     }  
-    delay(5);
+//    delay(5);
   }
 }
 
@@ -184,14 +195,29 @@ void setup() {
 }
 
 void loop() {
+//  strand[0].clear();
+//  for(int j=1; j<150; j++)
+//  {
+//    strand[0].fill(strand[0].ColorHSV(0, 0, 0), 0, j-1);
+//    strand[0].fill(strand[0].ColorHSV(0, 0, 255), j, j);
+//    strand[0].fill(strand[0].ColorHSV(0, 0, 0), j+1, 150);
+//    strand[0].show();
+////  delay(1);
+//  }
+//  return;
+  
+  
   uint16_t pot;
   static uint32_t hue_adj_end = 0;
+  static uint32_t sat_adj_end = 0;
   static uint16_t last_pot;
   static uint8_t strand_index=0;
   static uint16_t pot_hue_offset;
+  static uint8_t pot_sat_offset;
   uint8_t button;
   uint8_t button2;
   button = !digitalRead(POT_SW_PIN);
+  button2 = !digitalRead(3);
   
   pot = read_pot(); 
   value_sum -= value_sum/ROLL_AVG_N;
@@ -223,7 +249,37 @@ void loop() {
     }
     hue[strand_index] = hue[strand_index] + ((pot << 6) - pot_hue_offset);
     pot_hue_offset = pot << 6;
-    strand[strand_index].fill(get_color(hue[strand_index], value), 0, snum[strand_index]);
+    strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
+    strand[strand_index].show(); 
+  }
+  else if(button2 == 1 || sat_adj_end > millis())
+  {
+    set_value(64);
+    if(sat_adj_end > millis() && button2 == 1)
+    {
+      strand_index = (strand_index + 1) % NUM_STRANDS;
+      strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
+      strand[strand_index].show();  
+      delay(100);
+      sat_adj_end = millis() + HUE_ADJ_TIMEOUT;
+    }
+    if(sat_adj_end == 0)
+    {
+      //pot_sat_offset = pot >> 2;
+      strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
+      strand[strand_index].show();  
+      delay(100);
+      sat_adj_end = millis() + HUE_ADJ_TIMEOUT;
+    }
+    if ( abs(pot - last_pot) > 20)
+    {
+       sat_adj_end = millis() + HUE_ADJ_TIMEOUT;
+       last_pot = pot;
+    }
+    //sat[strand_index] = sat[strand_index] + ((pot >> 2) - pot_sat_offset);
+    //pot_sat_offset = pot >> 2;
+    sat[strand_index] = pot >> 2;
+    strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
     strand[strand_index].show(); 
   }
   else
@@ -233,18 +289,20 @@ void loop() {
     //value = value_sum/8;
   }
   
-  if(hue_adj_end < millis() && hue_adj_end != 0 )
+  if((hue_adj_end < millis() && hue_adj_end != 0) ||  (sat_adj_end < millis() && sat_adj_end != 0))
   { 
      save_eeprom();
-     for(int i=0; i<NUM_STRANDS; i++)
-     {
-       strand[i].fill(strand[i].Color(0,0,0), 0, snum[i]);
-       strand[i].show();  
-     }
+//     for(int i=0; i<NUM_STRANDS; i++)
+//     {
+//       strand[i].fill(strand[i].Color(0,0,0), 0, snum[i]);
+//       strand[i].show();  
+//     }
+     set_value(0);
      delay(100);
-     value = 0;
+//     value = 0;
      set_value(value_sum/ROLL_AVG_N);
      hue_adj_end = 0;
+     sat_adj_end = 0;
   }
   //pixels.show?
 }
