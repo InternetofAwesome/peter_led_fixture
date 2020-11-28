@@ -44,10 +44,18 @@ extern const uint8_t gamma8[];
 #define LEDS_PER_STRAND 8
 #define NUM_STRANDS 5
 #define ROLL_AVG_N 32
+#define VALUE_INC 4 //amount to increment/decrement value while moving toward target_value
+#define EFFECT_SPEED 2 //number of LED updates between incrementing the "effect" along the strands
+#define EFFECT_BRIGHTNESS 2 //birghtness of the effect, 1/n. eg, 4 would mean that the effect is 1/4 as bright as the set brightness
+#define MAX_STRAND_LEN 121
+#define EFFECT_TIME_MIN 5*1000//minimum amount of time between doing an effect (ms)
+#define EFFECT_TIME_MAX 20*1000//Maximum time between effects (ms)
 
 int sensorPin = A0;    // select the input pin for the potentiometer
 int ledPin = 13;      // select the pin for the LED
 int sensorValue = 0;  // variable to store the value coming from the sensor
+
+static uint8_t effect[] = {21, 43, 64, 85, 106, 128, 149, 170, 191, 213, 234, 255, 234, 213, 191, 170, 149, 128, 106, 85, 64, 43, 21};
 
 //LED control pins
 uint8_t spins[] = {4, 5, 6, 7, 8};
@@ -88,6 +96,7 @@ button_t bonus_sw = {BONUS_SW_PIN, BONUS_SW_POL, OFF, 50};
 pot_state_e pot_state = NORMAL;
 
 uint8_t value = 128;
+uint8_t target_value;
 uint16_t hue[] = {0, 0, 0, 0, 0};
 uint8_t sat[] = {0, 0, 0, 0, 0};
 
@@ -122,34 +131,63 @@ uint32_t get_color(uint16_t h, uint8_t s, uint8_t v)
   return strand[0].gamma32(strand[0].ColorHSV(h, s, v));
 }
 
-void set_value(uint8_t val)
+void update()
 {
-  int inc;
-  if(val == value)
+  static uint8_t effect_location = 0; //keeps track of where the effect starts
+  static uint8_t effect_counter = 0; //counts frames between an effect change
+  static uint32_t next_run = 0;
+  if(next_run < millis() && effect_location == 0xff)
+  {
+    effect_location = 0;
+  }
+  if(target_value != value) //only adjust balue if they are different
+  {
+    if(abs(target_value - value) < VALUE_INC) //if they need to adjusted less than our increment value
+      value = target_value; //then just set them equal
+    else if(target_value - value > 0) //find out if we need to increment or decrement value
+      value += VALUE_INC;
+    else
+      value -= VALUE_INC;
+  }
+  if(effect_location != 255)
   {
     for(int i=0; i<NUM_STRANDS; i++)
     { 
       strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
-    }
-    return;
-  }
-  if(val < value)
-    inc = -1;
-  else
-    inc = 1;
-    
-  inc *= 4;
-  
-  while(abs(value - val) > 4)
-  {
-    value += inc;
-    for(int i=0; i<NUM_STRANDS; i++)
-    {
-      strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
+      for(int j=0; j<sizeof(effect); j++)
+      {
+        //uint32_t eff_bright = (uint32_t)value + ((uint32_t)value * (uint32_t)effect[j])/0xff/(uint32_t)EFFECT_BRIGHTNESS;
+        uint32_t eff_bright = value + effect[j]/EFFECT_BRIGHTNESS*value/255;
+        if(eff_bright & 0xffffff00)
+          eff_bright &= 0xff;
+        strand[i].setPixelColor(effect_location+j, get_color(hue[i], sat[i], (uint8_t)eff_bright)); //this will mess up at the upper end of brightness
+        //strand[i].setPixelColor(effect_location+j, get_color(hue[i], sat[i], value + 20)); //this will mess up at the upper end of brightness
+      }
+      //strand[i].fill(get_color(hue[i], sat[i], 0),  effect_location, snum[i]); 
       strand[i].show();
-    }  
-//    delay(5);
+    }
+    effect_counter++;
+    
+    if(!(effect_counter % EFFECT_SPEED))
+    {
+      effect_location++;
+      effect_counter=0;
+    }
+    if((MAX_STRAND_LEN + sizeof(effect)) < effect_location)
+    {
+      effect_location = 255;
+      effect_counter = 0;
+      next_run = millis()+random(EFFECT_TIME_MIN, EFFECT_TIME_MAX);
+    }
   }
+  else
+  {
+    for(int i=0; i<NUM_STRANDS; i++)
+    { 
+      strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]);
+      strand[i].show();
+    }
+  }  
 }
 
 int read_pot()
@@ -184,6 +222,7 @@ void setup() {
   pinMode(POT_SW_PIN, INPUT_PULLUP);
   pinMode(BONUS_SW_PIN, INPUT_PULLUP);
   load_eeprom();
+  value = read_pot()>>2;
   value_sum = value*ROLL_AVG_N;
   for(int i=0; i<NUM_STRANDS; i++)
   {
@@ -225,7 +264,7 @@ void loop() {
   
   if(button == 1 || hue_adj_end > millis())
   {
-    set_value(64);
+    target_value = 64;
     if(hue_adj_end > millis() && button == 1)
     {
       strand_index = (strand_index + 1) % NUM_STRANDS;
@@ -249,12 +288,12 @@ void loop() {
     }
     hue[strand_index] = hue[strand_index] + ((pot << 6) - pot_hue_offset);
     pot_hue_offset = pot << 6;
-    strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
-    strand[strand_index].show(); 
+    //strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
+    //strand[strand_index].show(); 
   }
   else if(button2 == 1 || sat_adj_end > millis())
   {
-    set_value(64);
+    target_value = 64;
     if(sat_adj_end > millis() && button2 == 1)
     {
       strand_index = (strand_index + 1) % NUM_STRANDS;
@@ -279,13 +318,13 @@ void loop() {
     //sat[strand_index] = sat[strand_index] + ((pot >> 2) - pot_sat_offset);
     //pot_sat_offset = pot >> 2;
     sat[strand_index] = pot >> 2;
-    strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
-    strand[strand_index].show(); 
+    //strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
+    //strand[strand_index].show(); 
   }
   else
   {
     //value = c_lin[pot>>2 & 0xff];
-    set_value(value_sum/ROLL_AVG_N);
+    target_value = value_sum/ROLL_AVG_N;
     //value = value_sum/8;
   }
   
@@ -297,12 +336,13 @@ void loop() {
 //       strand[i].fill(strand[i].Color(0,0,0), 0, snum[i]);
 //       strand[i].show();  
 //     }
-     set_value(0);
-     delay(100);
+//     set_value(0);
+//     delay(100);
 //     value = 0;
-     set_value(value_sum/ROLL_AVG_N);
+     target_value = value_sum/ROLL_AVG_N;
      hue_adj_end = 0;
      sat_adj_end = 0;
   }
+  update();
   //pixels.show?
 }
