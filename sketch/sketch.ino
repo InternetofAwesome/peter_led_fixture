@@ -41,13 +41,10 @@ extern const uint8_t gamma8[];
 #define VALUE_INC 4 //amount to increment/decrement value while moving toward target_value
 #define EFFECT_SPEED 2 //number of LED updates between incrementing the "effect" along the strands
 #define EFFECT_BRIGHTNESS 2 //birghtness of the effect, 1/n. eg, 4 would mean that the effect is 1/4 as bright as the set brightness
-#define MAX_STRAND_LEN 121
 #define EFFECT_TIME_MIN 1*1000//minimum amount of time between doing an effect (ms)
 #define EFFECT_TIME_MAX 2*1000//Maximum time between effects (ms)
 
 int sensorPin = A0;    // select the input pin for the potentiometer
-int ledPin = 13;      // select the pin for the LED
-int sensorValue = 0;  // variable to store the value coming from the sensor
 
 static uint8_t effect[] = {13, 27, 40, 54, 67, 81, 94, 107, 121, 134, 148, 161, 174, 188, 201, 215, 228, 242, 255, 242, 228, 215, 201, 188, 174, 161, 148, 134, 121, 107, 94, 81, 67, 64, 40, 27, 13};
 
@@ -176,10 +173,6 @@ uint8_t read_button(uint8_t pin)
 
 
 void setup() {
-  // declare the ledPin as an OUTPUT:
-  pinMode(ledPin, OUTPUT);  
-//  clock_prescale_set(clock_div_1);
-  //setup our gpios
   pinMode(HUE_PIN, INPUT_PULLUP);
   pinMode(SAT_PIN, INPUT_PULLUP);
   load_eeprom();
@@ -194,19 +187,7 @@ void setup() {
   }
 }
 
-void loop() {
-//  strand[0].clear();
-//  for(int j=1; j<150; j++)
-//  {
-//    strand[0].fill(strand[0].ColorHSV(0, 0, 0), 0, j-1);
-//    strand[0].fill(strand[0].ColorHSV(0, 0, 255), j, j);
-//    strand[0].fill(strand[0].ColorHSV(0, 0, 0), j+1, 150);
-//    strand[0].show();
-////  delay(1);
-//  }
-//  return;
-  
-  
+void loop() {  
   uint16_t pot;
   static uint32_t hue_adj_end = 0;
   static uint32_t sat_adj_end = 0;
@@ -214,48 +195,65 @@ void loop() {
   static uint8_t strand_index=0;
   static uint16_t pot_hue_offset;
   static uint8_t pot_sat_offset;
-  uint8_t button;
-  uint8_t button2;
-  button = !digitalRead(HUE_PIN);
-  button2 = !digitalRead(3);
+  uint8_t hue_button;
+  uint8_t sat_button;
+  hue_button = !digitalRead(HUE_PIN);
+  sat_button = !digitalRead(SAT_PIN);
   
-  pot = read_pot(); 
-  value_sum -= value_sum/ROLL_AVG_N;
-  value_sum += pot>>2 & 0xff;
+  pot = read_pot(); //read the pot value *once* at the top of the loop
+  value_sum -= value_sum/ROLL_AVG_N; //subtract the average value from the rolling sum of the pot value
+  value_sum += pot>>2 & 0xff; //add the actual pot value to the rolling sum. ADC is 10 bits, so we shift right 2 to make the right range for the LED brightness of 0-255
   
-  if(button == 1 || hue_adj_end > millis())
+  //if the hue button is down, OR our hue adjustment timeout has not elapsed
+  if(hue_button == 1 || hue_adj_end > millis()) 
   {
+    //set a brightness target of a fixed (arbitrary) value 
     target_value = 64;
-    if(hue_adj_end > millis() && button == 1)
+    //if our timeout has NOT elapsed, and the hue button has been pressed
+    if(hue_adj_end > millis() && hue_button == 1)
     {
+      //increment the index of the strand we are adjusting
       strand_index = (strand_index + 1) % sizeof(snum);
+      //set that strand to all black for a short amount of time, so we can identify it.
       strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
       strand[strand_index].show();  
       delay(100);
+      
+      //reset our timeout to some time in the future
       hue_adj_end = millis() + HUE_ADJ_TIMEOUT;
     }
+    //if we do not have a timeout set
     if(hue_adj_end == 0)
     {
+      /* save our current pot location, so we can subtract it out. This will allow us to adjust the
+      hue RELATIVE to the current pot position, instead of just using the ABSOLUTE value of the pot
+      reading, which would instantly change the color when we changed to adjust that strand.
+      Also, the Hue controls are 16-bits, hence the shift left */
       pot_hue_offset = pot << 6;
+      //blank the currently controlled strand for a bit
       strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
       strand[strand_index].show();  
       delay(100);
+      //reset our tiemout
       hue_adj_end = millis() + HUE_ADJ_TIMEOUT;
     }
+    //this was an attempt to add some noise immunity. If there's too much noise, the adjustment 
+    //mode will never time out
     if ( abs(pot - last_pot) > 20)
     {
        hue_adj_end = millis() + HUE_ADJ_TIMEOUT;
        last_pot = pot;
     }
+    //use our pot offset to get a new hue value, using the pot value
     hue[strand_index] = hue[strand_index] + ((pot << 6) - pot_hue_offset);
+    //reset the pot offset (we always want to subtract it out)
     pot_hue_offset = pot << 6;
-    //strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
-    //strand[strand_index].show(); 
   }
-  else if(button2 == 1 || sat_adj_end > millis())
+  //this block is almost exactly the same as the above if-block. See comments above
+  else if(hue_button == 1 || sat_adj_end > millis())
   {
     target_value = 64;
-    if(sat_adj_end > millis() && button2 == 1)
+    if(sat_adj_end > millis() && hue_button == 1)
     {
       strand_index = (strand_index + 1) % sizeof(snum);
       strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
@@ -276,34 +274,28 @@ void loop() {
        sat_adj_end = millis() + HUE_ADJ_TIMEOUT;
        last_pot = pot;
     }
-    //sat[strand_index] = sat[strand_index] + ((pot >> 2) - pot_sat_offset);
-    //pot_sat_offset = pot >> 2;
-    sat[strand_index] = pot >> 2;
-    //strand[strand_index].fill(get_color(hue[strand_index], sat[strand_index], value), 0, snum[strand_index]);
-    //strand[strand_index].show(); 
+    //update the 8-bit saturation target
+    sat[strand_index] = pot >> 2; 
   }
   else
   {
-    //value = c_lin[pot>>2 & 0xff];
+  	//adjust the target value. See the update function for why that is important.
     target_value = value_sum/ROLL_AVG_N;
-    //value = value_sum/8;
   }
   
+  //if our hue adjustment timeout has elapsed, and hue adjustment timeout is non-zero (non-zero 
+  // means there is not one set). Same logic applies for the saturation timeout
   if((hue_adj_end < millis() && hue_adj_end != 0) ||  (sat_adj_end < millis() && sat_adj_end != 0))
   { 
-     save_eeprom();
-//     for(int i=0; i<NUM_STRANDS; i++)
-//     {
-//       strand[i].fill(strand[i].Color(0,0,0), 0, snum[i]);
-//       strand[i].show();  
-//     }
-//     set_value(0);
-//     delay(100);
-//     value = 0;
-     target_value = value_sum/ROLL_AVG_N;
-     hue_adj_end = 0;
-     sat_adj_end = 0;
+  	//save the hue and saturation values to EEPROM
+    save_eeprom();
+    //set target value - This may be redundant to the above setting operation.
+    target_value = value_sum/ROLL_AVG_N;
+
+    //make sure our timeouts are zeroed out
+    hue_adj_end = 0;
+    sat_adj_end = 0;
   }
+  //update the pixels
   update();
-  //pixels.show?
 }
