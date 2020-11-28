@@ -27,9 +27,6 @@
  
  */
 
-//gamma corrected lookup tables from Adafruit lib
-extern const uint8_t gamma8[];
-
 #include "Adafruit_NeoPixel.h"
 #include <EEPROM.h>
 
