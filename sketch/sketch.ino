@@ -48,8 +48,8 @@ extern const uint8_t gamma8[];
 #define EFFECT_SPEED 2 //number of LED updates between incrementing the "effect" along the strands
 #define EFFECT_BRIGHTNESS 2 //birghtness of the effect, 1/n. eg, 4 would mean that the effect is 1/4 as bright as the set brightness
 #define MAX_STRAND_LEN 121
-#define EFFECT_TIME_MIN 5*1000//minimum amount of time between doing an effect (ms)
-#define EFFECT_TIME_MAX 20*1000//Maximum time between effects (ms)
+#define EFFECT_TIME_MIN 1*1000//minimum amount of time between doing an effect (ms)
+#define EFFECT_TIME_MAX 2*1000//Maximum time between effects (ms)
 
 int sensorPin = A0;    // select the input pin for the potentiometer
 int ledPin = 13;      // select the pin for the LED
@@ -133,13 +133,9 @@ uint32_t get_color(uint16_t h, uint8_t s, uint8_t v)
 
 void update()
 {
-  static uint8_t effect_location = 0; //keeps track of where the effect starts
-  static uint8_t effect_counter = 0; //counts frames between an effect change
-  static uint32_t next_run = 0;
-  if(next_run < millis() && effect_location == 0xff)
-  {
-    effect_location = 0;
-  }
+  static uint8_t effect_location[] = {0,0,0,0,0}; //keeps track of where the effect starts
+  static uint8_t effect_counter=0; //counts frames between an effect change
+  static uint32_t next_run[] = {0,0,0,0,0};
   if(target_value != value) //only adjust balue if they are different
   {
     if(abs(target_value - value) < VALUE_INC) //if they need to adjusted less than our increment value
@@ -149,45 +145,39 @@ void update()
     else
       value -= VALUE_INC;
   }
-  if(effect_location != 255)
-  {
-    for(int i=0; i<NUM_STRANDS; i++)
-    { 
-      strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
+  
+  for(int i=0; i<NUM_STRANDS; i++)
+  { 
+    strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
+    if(next_run[i] < millis() && effect_location[i] == 0xff)
+    {
+      effect_location[i] = 0;
+    }
+    if(effect_location[i] != 255)
+    {
       for(int j=0; j<sizeof(effect); j++)
       {
         //uint32_t eff_bright = (uint32_t)value + ((uint32_t)value * (uint32_t)effect[j])/0xff/(uint32_t)EFFECT_BRIGHTNESS;
         uint32_t eff_bright = value + effect[j]/EFFECT_BRIGHTNESS*value/255;
         if(eff_bright & 0xffffff00)
           eff_bright &= 0xff;
-        strand[i].setPixelColor(effect_location+j, get_color(hue[i], sat[i], (uint8_t)eff_bright)); //this will mess up at the upper end of brightness
+        strand[i].setPixelColor(effect_location[i]-sizeof(effect)+j, get_color(hue[i], sat[i], (uint8_t)eff_bright)); //this will mess up at the upper end of brightness
         //strand[i].setPixelColor(effect_location+j, get_color(hue[i], sat[i], value + 20)); //this will mess up at the upper end of brightness
       }
-      //strand[i].fill(get_color(hue[i], sat[i], 0),  effect_location, snum[i]); 
-      strand[i].show();
     }
-    effect_counter++;
-    
     if(!(effect_counter % EFFECT_SPEED))
     {
-      effect_location++;
-      effect_counter=0;
+      effect_location[i]++;
     }
-    if((MAX_STRAND_LEN + sizeof(effect)) < effect_location)
+    if((snum[i] + sizeof(effect)) < effect_location[i])
     {
-      effect_location = 255;
-      effect_counter = 0;
-      next_run = millis()+random(EFFECT_TIME_MIN, EFFECT_TIME_MAX);
+      effect_location[i] = 255;
+      next_run[i] = millis()+random(EFFECT_TIME_MIN, EFFECT_TIME_MAX);
     }
+    //strand[i].fill(get_color(hue[i], sat[i], 0),  effect_location, snum[i]); 
+    strand[i].show();
   }
-  else
-  {
-    for(int i=0; i<NUM_STRANDS; i++)
-    { 
-      strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]);
-      strand[i].show();
-    }
-  }  
+  effect_counter++;
 }
 
 int read_pot()
