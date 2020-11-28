@@ -33,17 +33,11 @@ extern const uint8_t gamma8[];
 #include "Adafruit_NeoPixel.h"
 #include <EEPROM.h>
 
-// Hysteresis value for reading the pot
-#define POT_HYS 4
-#define POT_SW_PIN 2
-#define POT_SW_POL 0 //active low
-#define BONUS_SW_PIN 3
-#define BONUS_SW_POL 0 //active low
+#define HUE_PIN 2
+#define SAT_PIN 3
 #define NUM_LEDS 8*8
 #define HUE_ADJ_TIMEOUT 2000 //amount of time you have after hitting the button to adjust the hue, milliseconds
-#define LEDS_PER_STRAND 8
-#define NUM_STRANDS 5
-#define ROLL_AVG_N 32
+#define ROLL_AVG_N 50
 #define VALUE_INC 4 //amount to increment/decrement value while moving toward target_value
 #define EFFECT_SPEED 2 //number of LED updates between incrementing the "effect" along the strands
 #define EFFECT_BRIGHTNESS 2 //birghtness of the effect, 1/n. eg, 4 would mean that the effect is 1/4 as bright as the set brightness
@@ -55,12 +49,13 @@ int sensorPin = A0;    // select the input pin for the potentiometer
 int ledPin = 13;      // select the pin for the LED
 int sensorValue = 0;  // variable to store the value coming from the sensor
 
-static uint8_t effect[] = {21, 43, 64, 85, 106, 128, 149, 170, 191, 213, 234, 255, 234, 213, 191, 170, 149, 128, 106, 85, 64, 43, 21};
+static uint8_t effect[] = {13, 27, 40, 54, 67, 81, 94, 107, 121, 134, 148, 161, 174, 188, 201, 215, 228, 242, 255, 242, 228, 215, 201, 188, 174, 161, 148, 134, 121, 107, 94, 81, 67, 64, 40, 27, 13};
 
 //LED control pins
 uint8_t spins[] = {4, 5, 6, 7, 8};
 //leds per each strand
-uint8_t snum[] = {88, 121, 119, 116, 71};
+//uint8_t snum[] = {88, 121, 119, 116, 71};
+uint8_t snum[] = {71, 116, 119, 121, 88};
 
 Adafruit_NeoPixel strand[] = {
   Adafruit_NeoPixel(snum[0], spins[0], NEO_GRB + NEO_KHZ800),
@@ -70,30 +65,6 @@ Adafruit_NeoPixel strand[] = {
   Adafruit_NeoPixel(snum[4], spins[4], NEO_GRB + NEO_KHZ800),
 };
 
-typedef enum {
-  NORMAL = 0, //normal pot operation. Controls brightness
-  POT_OFF,
-  POT_ON,
-  COLOR_CONTROL,
-} pot_state_e;
-
-typedef enum {
-  OFF,
-  DEBOUNCE,
-  ON,
-} button_state_e;
-
-typedef struct {
-  uint8_t pin;
-  uint8_t pol;
-  button_state_e state;
-  uint16_t debounce_millis;
-} button_t;
-
-button_t pot_sw = {POT_SW_PIN, POT_SW_POL, OFF, 50};
-button_t bonus_sw = {BONUS_SW_PIN, BONUS_SW_POL, OFF, 50};
-
-pot_state_e pot_state = NORMAL;
 
 uint8_t value = 128;
 uint8_t target_value;
@@ -146,7 +117,7 @@ void update()
       value -= VALUE_INC;
   }
   
-  for(int i=0; i<NUM_STRANDS; i++)
+  for(int i=0; i<sizeof(snum); i++)
   { 
     strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
     if(next_run[i] < millis() && effect_location[i] == 0xff)
@@ -209,12 +180,12 @@ void setup() {
   pinMode(ledPin, OUTPUT);  
 //  clock_prescale_set(clock_div_1);
   //setup our gpios
-  pinMode(POT_SW_PIN, INPUT_PULLUP);
-  pinMode(BONUS_SW_PIN, INPUT_PULLUP);
+  pinMode(HUE_PIN, INPUT_PULLUP);
+  pinMode(SAT_PIN, INPUT_PULLUP);
   load_eeprom();
   value = read_pot()>>2;
   value_sum = value*ROLL_AVG_N;
-  for(int i=0; i<NUM_STRANDS; i++)
+  for(int i=0; i<sizeof(snum); i++)
   {
     strand[i].begin();
     strand[i].clear();
@@ -245,7 +216,7 @@ void loop() {
   static uint8_t pot_sat_offset;
   uint8_t button;
   uint8_t button2;
-  button = !digitalRead(POT_SW_PIN);
+  button = !digitalRead(HUE_PIN);
   button2 = !digitalRead(3);
   
   pot = read_pot(); 
@@ -257,7 +228,7 @@ void loop() {
     target_value = 64;
     if(hue_adj_end > millis() && button == 1)
     {
-      strand_index = (strand_index + 1) % NUM_STRANDS;
+      strand_index = (strand_index + 1) % sizeof(snum);
       strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
       strand[strand_index].show();  
       delay(100);
@@ -286,7 +257,7 @@ void loop() {
     target_value = 64;
     if(sat_adj_end > millis() && button2 == 1)
     {
-      strand_index = (strand_index + 1) % NUM_STRANDS;
+      strand_index = (strand_index + 1) % sizeof(snum);
       strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
       strand[strand_index].show();  
       delay(100);
