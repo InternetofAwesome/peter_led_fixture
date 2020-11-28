@@ -54,6 +54,7 @@ uint8_t spins[] = {4, 5, 6, 7, 8};
 //uint8_t snum[] = {88, 121, 119, 116, 71};
 uint8_t snum[] = {71, 116, 119, 121, 88};
 
+//initialize our pixel strand objects
 Adafruit_NeoPixel strand[] = {
   Adafruit_NeoPixel(snum[0], spins[0], NEO_GRB + NEO_KHZ800),
   Adafruit_NeoPixel(snum[1], spins[1], NEO_GRB + NEO_KHZ800),
@@ -62,9 +63,12 @@ Adafruit_NeoPixel strand[] = {
   Adafruit_NeoPixel(snum[4], spins[4], NEO_GRB + NEO_KHZ800),
 };
 
-
+//global value for the brightness being displayed
 uint8_t value = 128;
+//global value for the brightness we WANT, so we can smoothly transition to it
 uint8_t target_value;
+
+//hue and sat values for each strand
 uint16_t hue[] = {0, 0, 0, 0, 0};
 uint8_t sat[] = {0, 0, 0, 0, 0};
 
@@ -72,6 +76,7 @@ uint32_t value_sum; //used for running average of value
 
 void load_eeprom()
 {
+  //loop through each value of hue, and load it from a corresponding address in eeprom
   for(int i=0; i<sizeof(hue); i++)
   {
     ((uint8_t*)hue)[i] = EEPROM.read(i);
@@ -82,6 +87,7 @@ void load_eeprom()
   }
 }
 
+//same as above, opposite direction.
 void save_eeprom()
 {
   for(int i=0; i<sizeof(hue); i++)
@@ -94,109 +100,132 @@ void save_eeprom()
   }
 }
 
+//convenience function to give me a usable color value from HSB
 uint32_t get_color(uint16_t h, uint8_t s, uint8_t v)
 {
   return strand[0].gamma32(strand[0].ColorHSV(h, s, v));
 }
 
+//this does a lot of the heavy lifting of setting colors and running animations
 void update()
 {
   static uint8_t effect_location[] = {0,0,0,0,0}; //keeps track of where the effect starts
   static uint8_t effect_counter=0; //counts frames between an effect change
-  static uint32_t next_run[] = {0,0,0,0,0};
-  if(target_value != value) //only adjust balue if they are different
+  static uint32_t next_run[] = {0,0,0,0,0}; //time index of when we should start the next effect
+  //adjust the brightness value
+  if(target_value != value) //only adjust value if they are different
   {
-    if(abs(target_value - value) < VALUE_INC) //if they need to adjusted less than our increment value
+  	//if target value and value are only off by less than the increment amount, just set them equal
+    if(abs(target_value - value) < VALUE_INC) 
       value = target_value; //then just set them equal
     else if(target_value - value > 0) //find out if we need to increment or decrement value
       value += VALUE_INC;
     else
       value -= VALUE_INC;
-  }
+  } //note brightness is not actually applied in this block, just calculated
   
+  //go through each strand, and apply effect, if applicable, and update value/hue/sat
   for(int i=0; i<sizeof(snum); i++)
   { 
+  	//fill the entire strand memory buffer with the right HSV
     strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
+    //if were at, or later than the right time to apply the effect, and the effect loaction is out
+    //of bounds, indicating that it has not been set
     if(next_run[i] < millis() && effect_location[i] == 0xff)
     {
+      //then set it to zero, which is where it will start
       effect_location[i] = 0;
     }
+    //if the effect location is valid, then apply the effect
     if(effect_location[i] != 255)
     {
+      //iterate over all elements of the "effect" values
       for(int j=0; j<sizeof(effect); j++)
       {
-        //uint32_t eff_bright = (uint32_t)value + ((uint32_t)value * (uint32_t)effect[j])/0xff/(uint32_t)EFFECT_BRIGHTNESS;
+      	//calculate the value for the pixel affected by the effect
         uint32_t eff_bright = value + effect[j]/EFFECT_BRIGHTNESS*value/255;
+
+        //if the calculated brightness exceeds max, then set it to max
         if(eff_bright & 0xffffff00)
-          eff_bright &= 0xff;
+          eff_bright = 0xff; //255 (0xff) is max brightness
+        //set the appropriate pixel value to the brightness it should be for the location of the effect
         strand[i].setPixelColor(effect_location[i]-sizeof(effect)+j, get_color(hue[i], sat[i], (uint8_t)eff_bright)); //this will mess up at the upper end of brightness
-        //strand[i].setPixelColor(effect_location+j, get_color(hue[i], sat[i], value + 20)); //this will mess up at the upper end of brightness
       }
     }
+    //check to see if we should increment the location of the effect (we only want to do this every
+    // EFFECT_SPEED frames)
     if(!(effect_counter % EFFECT_SPEED))
     {
+      //increment the index of where the "effect" starts
       effect_location[i]++;
     }
+
+    //check to see if the effect location is out of bounds of the LED strand. If so, set it to 255 
+    //(invalid value)
     if((snum[i] + sizeof(effect)) < effect_location[i])
     {
+      //again, 255 represents an invalid location, and means an effect is not running
       effect_location[i] = 255;
+      //calculate a random time to start the next effect.
       next_run[i] = millis()+random(EFFECT_TIME_MIN, EFFECT_TIME_MAX);
     }
-    //strand[i].fill(get_color(hue[i], sat[i], 0),  effect_location, snum[i]); 
+    //pump out new values to all the pixels
     strand[i].show();
   }
+  //increment our frame counter
   effect_counter++;
 }
 
 int read_pot()
 {
+  //read the pot. bitmask just for extra safety to make sure number is in expected range
   return analogRead(sensorPin) & 0b1111111111;
 }
 
-uint8_t read_button(uint8_t pin)
-{
-  if(!digitalRead(pin)) //look for active low
-  {
-    uint16_t start = millis();
-    delayMicroseconds(3000); //delay to debounce
-    while(!digitalRead(pin) && ((millis() - start) < 250)); //waste time until the button is released, or we time out
-    if(!digitalRead(pin))
-    {
-      while(!digitalRead(pin)); //wait until switch lifted
-      return 0;
-    }
-    else
-      return 1;
-  }
-  return 0; //no button press
-}
-
-
+//setup our pins and whatnot. This runs once
 void setup() {
+  //set GRPIO direction and pullup
   pinMode(HUE_PIN, INPUT_PULLUP);
   pinMode(SAT_PIN, INPUT_PULLUP);
+  //load saved values from EEPROM
   load_eeprom();
+
+  //get an initial value for the brightness
   value = read_pot()>>2;
+  //set the rolling average total
   value_sum = value*ROLL_AVG_N;
+  //set each strand to the appropriate color
   for(int i=0; i<sizeof(snum); i++)
   {
+  	//initialize the strand
     strand[i].begin();
+    //clear it
     strand[i].clear();
+    //set pixel values
     strand[i].fill(strand[i].ColorHSV(hue[i], 255, value), 0, snum[i]); 
+    //pump out the values to LEDs
     strand[i].show();
   }
 }
 
+//this runs over and over... Forever.
 void loop() {  
   uint16_t pot;
+  //hue adjustment timeout
   static uint32_t hue_adj_end = 0;
+  //saturation adjustment timeout
   static uint32_t sat_adj_end = 0;
+  //previous pot position, used for timeout expiration
   static uint16_t last_pot;
+  //track the current LED strand for hue/sat adjustment
   static uint8_t strand_index=0;
+  //track offset of pot for relative hue adjustment
   static uint16_t pot_hue_offset;
-  static uint8_t pot_sat_offset;
+
+  //values to track button press values
   uint8_t hue_button;
   uint8_t sat_button;
+  //read button press values
   hue_button = !digitalRead(HUE_PIN);
   sat_button = !digitalRead(SAT_PIN);
   
@@ -263,7 +292,6 @@ void loop() {
     }
     if(sat_adj_end == 0)
     {
-      //pot_sat_offset = pot >> 2;
       strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
       strand[strand_index].show();  
       delay(100);
