@@ -43,8 +43,8 @@
 #define VALUE_INC 4 //amount to increment/decrement value while moving toward target_value
 #define EFFECT_SPEED 2 //number of LED updates between incrementing the "effect" along the strands
 #define EFFECT_BRIGHTNESS 2 //birghtness of the effect, 1/n. eg, 4 would mean that the effect is 1/4 as bright as the set brightness
-#define EFFECT_TIME_MIN 1*1000//minimum amount of time between doing an effect (ms)
-#define EFFECT_TIME_MAX 2*1000//Maximum time between effects (ms)
+#define EFFECT_TIME_MIN 10*1000//minimum amount of time between doing an effect (ms)
+#define EFFECT_TIME_MAX 30*1000//Maximum time between effects (ms)
 
 int sensorPin = A0;    // select the input pin for the potentiometer
 
@@ -106,6 +106,10 @@ void load_eeprom()
   {
      sat[i] = EEPROM.read(i + sizeof(hue));
   }
+  for(int i=0; i<sizeof(value); i++)
+  {
+    sat[i] = EEPROM.read(i + sizeof(hue)+sizeof(sat));
+  }
 }
 
 //same as above, opposite direction.
@@ -118,6 +122,10 @@ void save_eeprom()
   for(int i = 0; i<sizeof(sat); i++)
   {
      EEPROM.write(i + sizeof(hue), sat[i]);
+  }
+  for(int i=0; i<sizeof(value); i++)
+  {
+    EEPROM.write(i+sizeof(hue)+sizeof(sat), value);
   }
 }
 
@@ -179,7 +187,7 @@ uint16_t range_checked_update(uint16_t val, uint16_t max, bool wrap)
 //this does a lot of the heavy lifting of setting colors and running animations
 void update()
 {
-  static uint8_t effect_location[] = {0,0,0,0,0}; //keeps track of where the effect starts
+  static uint8_t effect_location[] = {0xff,0xff,0xff,0xff,0xff}; //keeps track of where the effect starts
   static uint8_t effect_counter=0; //counts frames between an effect change
   static uint32_t next_run[] = {0,0,0,0,0}; //time index of when we should start the next effect
   static uint8_t easter_location = 0;
@@ -216,13 +224,13 @@ void update()
       strand[i].fill(get_color(hue[i], sat[i], value),  0, snum[i]); 
       //if were at, or later than the right time to apply the effect, and the effect loaction is out
       //of bounds, indicating that it has not been set
-      if(next_run[i] < millis() && effect_location[i] == 0xff)
+      if(next_run[i] > millis() && effect_location[i] == 0xff)
       {
         //then set it to zero, which is where it will start
         effect_location[i] = 0;
       }
       //if the effect location is valid, then apply the effect
-      if(effect_location[i] != 255)
+      if(effect_location[i] != 0xff)
       {
         //iterate over all elements of the "effect" values
         for(int j=0; j<sizeof(effect); j++)
@@ -234,16 +242,15 @@ void update()
           if(eff_bright & 0xffffff00)
             eff_bright = 0xff; //255 (0xff) is max brightness
           //set the appropriate pixel value to the brightness it should be for the location of the effect
-          strand[i].setPixelColor(effect_location[i]-sizeof(effect)+j, get_color(hue[i], sat[i], (uint8_t)eff_bright)); //this will mess up at the upper end of brightness
-  
+          strand[i].setPixelColor(effect_location[i]-sizeof(effect)+j, get_color(hue[i], sat[i], (uint8_t)eff_bright)); //this will mess up at the upper end of brightnes
         }
-      }
-      //check to see if we should increment the location of the effect (we only want to do this every
-      // EFFECT_SPEED frames)
-      if(!(effect_counter % EFFECT_SPEED))
-      {
-        //increment the index of where the "effect" starts
-        effect_location[i]++;
+                  //check to see if we should increment the location of the effect (we only want to do this every
+        // EFFECT_SPEED frames)
+        if(!(effect_counter % EFFECT_SPEED))
+        {
+          //increment the index of where the "effect" starts
+          effect_location[i]++;
+        }
       }
   
       //check to see if the effect location is out of bounds of the LED strand. If so, set it to 255 
@@ -251,7 +258,7 @@ void update()
       if((snum[i] + sizeof(effect)) < effect_location[i])
       {
         //again, 255 represents an invalid location, and means an effect is not running
-        effect_location[i] = 255;
+        effect_location[i] = 0xff;
         //calculate a random time to start the next effect.
         next_run[i] = millis()+random(EFFECT_TIME_MIN, EFFECT_TIME_MAX);
       }
