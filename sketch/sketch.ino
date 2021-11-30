@@ -136,8 +136,8 @@ void save_eeprom()
     if(micros() - last < 10000)
       return;
     last = micros();
-    hue_press |= digitalRead(HUE_PIN);
-    sat_press |= digitalRead(SAT_PIN);
+    hue_press |= !digitalRead(HUE_PIN);
+    sat_press |= !digitalRead(SAT_PIN);
     but_press |= !digitalRead(BUT_PIN);
     PCIFR &= ~PCIF0;
 //    PCMSK0 &= ~(1<<PCINT1 | 1<<PCINT2 | 1<<PCINT3) ;
@@ -172,13 +172,7 @@ uint16_t range_checked_update(uint16_t val, uint16_t max, bool wrap)
       val = 0;
     else
       val += enc_pos; 
-  
-  Serial.print("value ");
-  Serial.print(val);
-  Serial.print(", speed ");
-  Serial.print(speed);
-  Serial.print(", offset ");
-  Serial.println(enc_pos);
+ 
   return val;
 }
 
@@ -199,7 +193,7 @@ void update()
     {
       for(int j=0; j<sizeof(effect); j++)
       {
-        strand[i].setPixelColor(easter_location-sizeof(effect)+j, get_color((hue[i]+effect[j]*256) & 0xefff, sat[i], value)); 
+        strand[i].setPixelColor(easter_location-sizeof(effect)+j, get_color((hue[i]+effect[j]*256) & 0xefff, 255, value)); 
       }
       //pump out new values to all the pixels
       strand[i].show();
@@ -271,10 +265,6 @@ void update()
 
 //setup our pins and whatnot. This runs once
 void setup() {
-    Serial.begin(115200);
-  while (!Serial)
-    ;
-   Serial.println("Setting up stuff");
   //set GRPIO direction and pullup
   pinMode(HUE_PIN, INPUT_PULLUP);
   pinMode(SAT_PIN, INPUT_PULLUP);
@@ -313,8 +303,6 @@ void setup() {
 //  EICRA = 0x03;
 //  attachInterrupt(digitalPinToInterrupt(ENC0), checkPosition, CHANGE);
 //  attachInterrupt(digitalPinToInterrupt(ENC1), checkPosition, CHANGE);
-  Serial.println("Stuff setup complete");
-  Serial.println(A1);
 
   
 
@@ -327,8 +315,6 @@ void reset_timeout()
 
 void enter_mode(mode_adj_t new_mode)
 {
-  Serial.print("mode: ");
-  Serial.println(new_mode);
       if(new_mode == MODE_NORM)
       {
         save_eeprom();
@@ -339,8 +325,6 @@ void enter_mode(mode_adj_t new_mode)
       {
         if(new_mode == mode)
           strand_index = (strand_index + 1) % sizeof(spins);
-        Serial.print("strand ");
-        Serial.println(strand_index);
         //blank the currently controlled strand for a bit
         strand[strand_index].fill(strand[strand_index].Color(0,0,0), 0, snum[strand_index]);
         strand[strand_index].show();  
@@ -356,13 +340,11 @@ void loop() {
   {
     enter_mode(MODE_HUE);
     hue_press = 0;
-    Serial.println("Hue press");
   }
   if(sat_press)
   {
     enter_mode(MODE_SAT);
     sat_press = 0;
-    Serial.println("Sat press");
   }
   if(but_press)
   {
@@ -370,7 +352,6 @@ void loop() {
       easter_egg =1;
     enter_mode(MODE_NORM);
     but_press = 0;
-    Serial.println("But press");
   }
 
   //give us more time if we're in an adjustment mode, and there is encoder movement.
